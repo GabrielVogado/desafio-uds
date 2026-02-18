@@ -83,8 +83,7 @@ class FileServiceTest {
     }
 
     @Test
-    void testUploadValidFile() throws IOException {
-        // Arrange
+    void deveFazerUploadDeArquivoValidoComSucesso() throws IOException {
         when(documentRepository.findById(1L)).thenReturn(Optional.of(testDocument));
         when(userRepository.findByUsername("testuser")).thenReturn(Optional.of(testUser));
         when(multipartFile.isEmpty()).thenReturn(false);
@@ -94,10 +93,8 @@ class FileServiceTest {
         when(multipartFile.getBytes()).thenReturn(new byte[]{1, 2, 3});
         when(fileVersionRepository.save(any(FileVersion.class))).thenReturn(testFileVersion);
 
-        // Act
         FileVersionDTO result = fileService.uploadFile(1L, multipartFile, "testuser");
 
-        // Assert
         assertThat(result).isNotNull();
         assertThat(result.getFileName()).isEqualTo("test.pdf");
         assertThat(result.getContentType()).isEqualTo("application/pdf");
@@ -107,15 +104,12 @@ class FileServiceTest {
     }
 
     @Test
-    void testUploadInvalidMimeType() throws IOException {
-        // Arrange
+    void deveLancarExcecaoQuandoFazerUploadDeArquivoComTipoInvalido() throws IOException {
         when(documentRepository.findById(1L)).thenReturn(Optional.of(testDocument));
-        when(userRepository.findByUsername("testuser")).thenReturn(Optional.of(testUser));
         when(multipartFile.isEmpty()).thenReturn(false);
         when(multipartFile.getSize()).thenReturn(1024L);
         when(multipartFile.getContentType()).thenReturn("text/plain");
 
-        // Act & Assert
         assertThatThrownBy(() -> fileService.uploadFile(1L, multipartFile, "testuser"))
                 .isInstanceOf(InvalidFileException.class)
                 .hasMessageContaining("File type not allowed");
@@ -124,14 +118,11 @@ class FileServiceTest {
     }
 
     @Test
-    void testUploadFileExceedingMaxSize() throws IOException {
-        // Arrange
+    void deveLancarExcecaoQuandoFazerUploadDeArquivoExcedendoTamanhoMaximo() throws IOException {
         when(documentRepository.findById(1L)).thenReturn(Optional.of(testDocument));
-        when(userRepository.findByUsername("testuser")).thenReturn(Optional.of(testUser));
         when(multipartFile.isEmpty()).thenReturn(false);
-        when(multipartFile.getSize()).thenReturn(20971520L); // > 10MB
+        when(multipartFile.getSize()).thenReturn(20971520L);
 
-        // Act & Assert
         assertThatThrownBy(() -> fileService.uploadFile(1L, multipartFile, "testuser"))
                 .isInstanceOf(InvalidFileException.class)
                 .hasMessageContaining("File size exceeds maximum");

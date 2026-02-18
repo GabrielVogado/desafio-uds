@@ -72,15 +72,12 @@ class DocumentServiceTest {
     }
 
     @Test
-    void testCreateDocumentSuccess() {
-        // Arrange
+    void deveCriarDocumentoComSucesso() {
         when(userRepository.findByUsername("testuser")).thenReturn(Optional.of(testUser));
         when(documentRepository.save(any(Document.class))).thenReturn(testDocument);
 
-        // Act
         DocumentDTO result = documentService.createDocument(createRequest, "testuser");
 
-        // Assert
         assertThat(result).isNotNull();
         assertThat(result.getTitle()).isEqualTo("Test Document");
         assertThat(result.getDescription()).isEqualTo("Test Description");
@@ -92,8 +89,7 @@ class DocumentServiceTest {
     }
 
     @Test
-    void testCreateDocumentWithEmptyTitle_throwsException() {
-        // Arrange
+    void deveLancarExcecaoQuandoCriarDocumentoComTituloVazio() {
         DocumentCreateRequest invalidRequest = DocumentCreateRequest.builder()
                 .title("")
                 .description("Test Description")
@@ -101,14 +97,12 @@ class DocumentServiceTest {
 
         when(userRepository.findByUsername("testuser")).thenReturn(Optional.of(testUser));
 
-        // Act & Assert
         assertThatThrownBy(() -> documentService.createDocument(invalidRequest, "testuser"))
                 .isInstanceOf(Exception.class);
     }
 
     @Test
-    void testListDocumentsWithFilters_returnsPaginated() {
-        // Arrange
+    void deveRetornarDocumentosPaginadosComFiltros() {
         Pageable pageable = PageRequest.of(0, 10);
         Document doc1 = Document.builder()
                 .id(1L)
@@ -130,14 +124,12 @@ class DocumentServiceTest {
                 testUser, "Document", Document.DocumentStatus.DRAFT, pageable))
                 .thenReturn(new PageImpl<>(Arrays.asList(doc1), pageable, 1));
 
-        // Act
         Page<DocumentDTO> result = documentService.listDocuments(
                 "testuser",
                 "Document",
                 Document.DocumentStatus.DRAFT,
                 pageable);
 
-        // Assert
         assertThat(result).isNotNull();
         assertThat(result.getContent()).hasSize(1);
         assertThat(result.getContent().get(0).getTitle()).isEqualTo("Document 1");
@@ -149,8 +141,7 @@ class DocumentServiceTest {
     }
 
     @Test
-    void testGetDocumentById_withUnauthorizedUser_throwsException() {
-        // Arrange
+    void deveLancarExcecaoQuandoUsuarioNaoAutorizadoTentarAcessarDocumento() {
         User otherUser = User.builder()
                 .id(2L)
                 .username("otheruser")
@@ -169,7 +160,6 @@ class DocumentServiceTest {
         when(documentRepository.findById(1L)).thenReturn(Optional.of(otherUserDocument));
         when(userRepository.findByUsername("testuser")).thenReturn(Optional.of(testUser));
 
-        // Act & Assert
         assertThatThrownBy(() -> documentService.getDocumentById(1L, "testuser"))
                 .isInstanceOf(UnauthorizedException.class)
                 .hasMessageContaining("permission");
@@ -178,29 +168,21 @@ class DocumentServiceTest {
     }
 
     @Test
-    void testDeleteDocument_success() {
-        // Arrange
+    void deveDeletarDocumentoComSucesso() {
         when(documentRepository.findById(1L)).thenReturn(Optional.of(testDocument));
-        when(userRepository.findByUsername("testuser")).thenReturn(Optional.of(testUser));
 
-        // Act
         documentService.deleteDocument(1L, "testuser");
 
-        // Assert
         verify(documentRepository, times(1)).delete(testDocument);
     }
 
     @Test
-    void testChangeDocumentStatus_success() {
-        // Arrange
+    void deveAlterarStatusDoDocumentoComSucesso() {
         when(documentRepository.findById(1L)).thenReturn(Optional.of(testDocument));
-        when(userRepository.findByUsername("testuser")).thenReturn(Optional.of(testUser));
         when(documentRepository.save(any(Document.class))).thenReturn(testDocument);
 
-        // Act
         DocumentDTO result = documentService.changeStatus(1L, Document.DocumentStatus.PUBLISHED, "testuser");
 
-        // Assert
         assertThat(result).isNotNull();
         verify(documentRepository, times(1)).save(any(Document.class));
     }

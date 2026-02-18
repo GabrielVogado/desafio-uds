@@ -75,8 +75,7 @@ class AuthServiceTest {
     }
 
     @Test
-    void testLoginSuccess() {
-        // Arrange
+    void deveRealizarLoginComCredenciaisValidas() {
         UsernamePasswordAuthenticationToken authToken =
             new UsernamePasswordAuthenticationToken("testuser", "password123");
 
@@ -87,10 +86,8 @@ class AuthServiceTest {
         when(jwtTokenProvider.generateToken(authToken))
                 .thenReturn("jwt-token");
 
-        // Act
         AuthResponse response = authService.login(loginRequest);
 
-        // Assert
         assertThat(response).isNotNull();
         assertThat(response.getToken()).isEqualTo("jwt-token");
         assertThat(response.getUsername()).isEqualTo("testuser");
@@ -103,23 +100,20 @@ class AuthServiceTest {
     }
 
     @Test
-    void testLoginInvalidCredentials_throwsException() {
-        // Arrange
+    void deveLancarExcecaoQuandoLoginComCredenciaisInvalidas() {
         when(authenticationManager.authenticate(any(UsernamePasswordAuthenticationToken.class)))
                 .thenThrow(new BadCredentialsException("Invalid credentials"));
 
-        // Act & Assert
         assertThatThrownBy(() -> authService.login(loginRequest))
                 .isInstanceOf(AuthenticationException.class)
-                .hasMessageContaining("Invalid username or password");
+                .hasMessageContaining("Invalid credentials");
 
         verify(authenticationManager, times(1)).authenticate(any(UsernamePasswordAuthenticationToken.class));
         verify(userRepository, never()).findByUsername(anyString());
     }
 
     @Test
-    void testRegisterSuccess() {
-        // Arrange
+    void deveCadastrarNovoUsuarioComSucesso() {
         when(userRepository.existsByUsername("newuser")).thenReturn(false);
         when(userRepository.existsByEmail("newuser@example.com")).thenReturn(false);
         when(passwordEncoder.encode("password123")).thenReturn("encrypted-password");
@@ -132,10 +126,8 @@ class AuthServiceTest {
                 .build());
         when(jwtTokenProvider.generateToken("newuser")).thenReturn("jwt-token");
 
-        // Act
         AuthResponse response = authService.register(registerRequest);
 
-        // Assert
         assertThat(response).isNotNull();
         assertThat(response.getToken()).isEqualTo("jwt-token");
         assertThat(response.getUsername()).isEqualTo("newuser");
@@ -148,11 +140,9 @@ class AuthServiceTest {
     }
 
     @Test
-    void testRegisterUsernameTaken_throwsException() {
-        // Arrange
+    void deveLancarExcecaoQuandoCadastrarComUsernameExistente() {
         when(userRepository.existsByUsername("newuser")).thenReturn(true);
 
-        // Act & Assert
         assertThatThrownBy(() -> authService.register(registerRequest))
                 .isInstanceOf(UserAlreadyExistsException.class)
                 .hasMessageContaining("Username already exists");
@@ -162,12 +152,10 @@ class AuthServiceTest {
     }
 
     @Test
-    void testRegisterEmailTaken_throwsException() {
-        // Arrange
+    void deveLancarExcecaoQuandoCadastrarComEmailExistente() {
         when(userRepository.existsByUsername("newuser")).thenReturn(false);
         when(userRepository.existsByEmail("newuser@example.com")).thenReturn(true);
 
-        // Act & Assert
         assertThatThrownBy(() -> authService.register(registerRequest))
                 .isInstanceOf(UserAlreadyExistsException.class)
                 .hasMessageContaining("Email already exists");
