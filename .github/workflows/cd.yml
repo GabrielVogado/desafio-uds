@@ -181,7 +181,7 @@ jobs:
     if: github.ref == 'refs/heads/master'
     environment:
       name: production
-      url: https://seu-dominio.com
+      url: https://desafio-uds.com
 
     steps:
       - name: Checkout code

@@ -154,7 +154,7 @@ DATABASE_PASSWORD=SenhaForteAqui123!
 JWT_SECRET=W2wvNCz77hYzwZktjysxmypm6YL2BciREhtKDSogW/A=
 
 # CORS
-CORS_ALLOWED_ORIGINS=https://seu-dominio.com
+CORS_ALLOWED_ORIGINS=https://desafio-uds.com
 
 # Profile
 SPRING_PROFILES_ACTIVE=prod
@@ -517,7 +517,7 @@ http {
 
     server {
         listen 80;
-        server_name seu-dominio.com;
+        server_name desafio-uds.com;
         
         client_max_body_size 10M;
 
@@ -539,9 +539,9 @@ Para SSL/HTTPS, adicione certificados Let's Encrypt:
 sudo apt install certbot
 
 # Gerar certificado
-sudo certbot certonly --standalone -d seu-dominio.com
+sudo certbot certonly --standalone -d desafio-uds.com
 
-# Os certificados ficarão em /etc/letsencrypt/live/seu-dominio.com/
+# Os certificados ficarão em /etc/letsencrypt/live/desafio-uds.com/
 ```
 
 Atualize o nginx.conf para usar HTTPS:
@@ -549,16 +549,16 @@ Atualize o nginx.conf para usar HTTPS:
 ```nginx
 server {
     listen 80;
-    server_name seu-dominio.com;
+    server_name desafio-uds.com;
     return 301 https://$host$request_uri;
 }
 
 server {
     listen 443 ssl http2;
-    server_name seu-dominio.com;
+    server_name desafio-uds.com;
 
-    ssl_certificate /etc/letsencrypt/live/seu-dominio.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/seu-dominio.com/privkey.pem;
+    ssl_certificate /etc/letsencrypt/live/desafio-uds.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/desafio-uds.com/privkey.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
 
     client_max_body_size 10M;
