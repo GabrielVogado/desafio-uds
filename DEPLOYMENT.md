@@ -1,233 +1,525 @@
-# DEPLOYMENT.md — Guia de Implantação em Produção
+# 🚀 DEPLOYMENT.md — Guia de Implantação em Produção
 
-Este documento substitui a versão que foi acidentalmente removida; contém instruções completas e verificadas para colocar a aplicação GED em produção usando Docker, Nginx (reverse proxy), SSL (Let's Encrypt), backups e monitoramento.
-
-Siga os passos na ordem: preparar infraestrutura -> build -> deploy -> monitorar -> backup.
+Guia completo para deploy da aplicação **Desafio UDS GED** (Gestão Eletrônica de Documentos) em produção usando Docker, PostgreSQL, GitHub Actions e boas práticas de DevOps.
 
 ---
 
-SUMÁRIO
-- Pré-requisitos
-- Arquivos de configuração essenciais
-- Exemplo de `.env.prod`
-- Docker: build e push de imagem
-- `docker-compose.prod.yml` (exemplo)
-- Nginx: configuração de reverse proxy e SSL
-- Let's Encrypt (certbot)
-- Backup / Restore (scripts)
-- Healthcheck e monitoramento
-- Segurança e boas práticas
-- Troubleshooting rápido
-- Checklist de deploy
+## 📋 SUMÁRIO
+
+1. [Pré-requisitos](#1-pré-requisitos)
+2. [Estrutura do Projeto](#2-estrutura-do-projeto)
+3. [Configuração de Ambiente](#3-configuração-de-ambiente)
+4. [Build e Deploy via Docker](#4-build-e-deploy-via-docker)
+5. [GitHub Actions (CI/CD)](#5-github-actions-cicd)
+6. [Configuração de Produção](#6-configuração-de-produção)
+7. [Backup e Restore](#7-backup-e-restore)
+8. [Monitoramento e Logs](#8-monitoramento-e-logs)
+9. [Segurança](#9-segurança)
+10. [Troubleshooting](#10-troubleshooting)
+11. [Checklist de Deploy](#11-checklist-de-deploy)
+
 
 ---
 
 ## 1. Pré-requisitos
 
-- Servidor Linux (Ubuntu 20.04+ recomendado) ou provedor em cloud (AWS, GCP, Azure).
-- Docker Engine (20.10+) instalado.
-- Docker Compose v2 (ou Compose plugin) instalado.
-- Domínio público com DNS apontando para o servidor.
-- Acesso SSH ao servidor e permissão para executar comandos administrativos.
-- Porta 80 e 443 liberadas (HTTP/HTTPS).
+### Infraestrutura
 
-Instalação rápida (Ubuntu):
+- **Servidor Linux**: Ubuntu 20.04+ ou similar
+- **Docker Engine**: 20.10+
+- **Docker Compose**: v2.x
+- **Memória RAM**: Mínimo 2GB (recomendado 4GB)
+- **Disco**: 20GB livres
+- **Portas**: 8080 (backend), 5432 (postgres)
+
+### Instalação Rápida (Ubuntu)
 
 ```bash
-# atualizar
+# Atualizar sistema
 sudo apt update && sudo apt upgrade -y
 
-# instalar Docker
+# Instalar Docker
 curl -fsSL https://get.docker.com -o get-docker.sh
 sudo sh get-docker.sh
 sudo usermod -aG docker $USER
 
-# instalar Docker Compose plugin
+# Instalar Docker Compose
 sudo apt-get install -y docker-compose-plugin
 
-# instalar certbot (Let's Encrypt)
-sudo apt install -y certbot
+# Verificar instalação
+docker --version
+docker compose version
+```
+
+### Ferramentas de Desenvolvimento
+
+- **Java 17** (Eclipse Temurin)
+- **Maven 3.9+**
+- **Git**
+- **Node.js 18+** (para frontend Angular)
+
+---
+
+## 2. Estrutura do Projeto
+
+```
+desafio-uds/
+├── .github/
+│   └── workflows/
+│       ├── ci.yml                    # Pipeline de testes
+│       └── cd.yml                    # Pipeline de deploy
+├── src/
+│   ├── main/
+│   │   ├── java/                     # Código backend
+│   │   └── resources/
+│   │       ├── application.properties           # Config padrão
+│   │       ├── application-dev.properties       # Dev
+│   │       ├── application-prod.properties      # Produção
+│   │       └── db/migration/                    # Flyway migrations
+│   └── test/                         # Testes unitários
+├── frontend/                         # Angular app
+├── uploads/                          # Arquivos enviados
+├── docker-compose.yml                # Ambiente local/dev
+├── Dockerfile                        # Build da aplicação
+├── pom.xml                          # Maven config
+└── README.md                        # Documentação
+
 ```
 
 ---
 
-## 2. Arquivos de configuração essenciais
+## 3. Configuração de Ambiente
 
-No diretório do projeto em produção (`/opt/desafio-uds` por exemplo) mantenha:
+### 3.1. Variáveis de Ambiente
 
-- `.env.prod` (variáveis de ambiente sensíveis, NÃO commitar)
-- `docker-compose.prod.yml` (definição de serviços para produção)
-- `nginx.conf` (configuração do reverse proxy)
-- `full-backup.sh` (script de backup)
-- `restore.sh` (script de restauração)
+O projeto usa **profiles do Spring Boot** para separar ambientes:
 
-**NUNCA** versionar `.env.prod` com segredos. Use secret manager quando possível (AWS Secrets Manager, Azure Key Vault, HashiCorp Vault).
+- `dev` - Desenvolvimento local
+- `prod` - Produção
 
----
+### 3.2. Arquivo `application-prod.properties`
 
-## 3. Exemplo de `.env.prod`
+Localização: `src/main/resources/application-prod.properties`
 
-Crie `.env.prod` com permissões restritas (chmod 600) e preencha valores reais:
-
-```
-# Spring Boot
-official_SPRING_PROFILES_ACTIVE=prod
-SERVER_PORT=8080
-SERVER_SERVLET_CONTEXT_PATH=/api
-
+```properties
 # Database
-action_SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/desafio_uds_prod
-SPRING_DATASOURCE_USERNAME=postgres
-SPRING_DATASOURCE_PASSWORD=UmaSenhaMuitoForteAqui123!
+spring.datasource.url=${DATABASE_URL}
+spring.datasource.username=${DATABASE_USER}
+spring.datasource.password=${DATABASE_PASSWORD}
+spring.datasource.driver-class-name=org.postgresql.Driver
+spring.datasource.hikari.maximum-pool-size=20
+
+# JPA/Hibernate
+spring.jpa.database-platform=org.hibernate.dialect.PostgreSQLDialect
+spring.jpa.hibernate.ddl-auto=validate
+spring.jpa.show-sql=false
+
+# Flyway Migrations
+spring.flyway.enabled=true
+spring.flyway.locations=classpath:db/migration
 
 # JWT
-JWT_SECRET=GerarComOpenSSL_32+chars
-JWT_EXPIRATION=86400000
+jwt.secret=${JWT_SECRET}
+jwt.expiration=86400000
+
+# Server
+server.servlet.context-path=/api
+server.port=8080
+server.compression.enabled=true
+
+# File Upload
+file.storage.path=/app/uploads
+file.max-size=10485760
+file.allowed-types=application/pdf,image/png,image/jpeg
 
 # CORS
-official_CORS_ALLOWED_ORIGINS=https://seu-dominio.com
+cors.allowed-origins=${CORS_ALLOWED_ORIGINS:http://localhost:4200}
 
-# S3 (opcional)
-AWS_ACCESS_KEY_ID=
-AWS_SECRET_ACCESS_KEY=
-AWS_REGION=
-AWS_S3_BUCKET=
-
-# Outros
-enable_metrics=true
+# Logging
+logging.level.root=INFO
+logging.level.br.com.gabrielvogado.desafiouds=INFO
 ```
 
-Substitua valores por segredos gerenciados quando possível.
+### 3.3. Variáveis de Ambiente Obrigatórias
 
----
-
-## 4. Build da imagem Docker e push
-
-No ambiente de build (CI) execute as etapas abaixo. A pipeline do GitHub Actions deve:
-
-1. Compilar e rodar testes (mvn test)
-2. Gerar artifact (JAR)
-3. Build da imagem Docker
-4. Tag e push para registry (Docker Hub / ECR / ACR)
-
-Exemplo de comandos locais (assumindo Docker e Maven no host de build):
+Crie um arquivo `.env.prod` (NÃO versionar):
 
 ```bash
-# build jar
-mvn -Pprod clean package -DskipTests
+# Database
+DATABASE_URL=jdbc:postgresql://postgres:5432/desafio_uds
+DATABASE_USER=postgres
+DATABASE_PASSWORD=SenhaForteAqui123!
 
-# build docker image
-docker build -t seu-registry/desafio-uds:1.0.0 .
+# JWT Secret (gerar com: openssl rand -base64 32)
+JWT_SECRET=W2wvNCz77hYzwZktjysxmypm6YL2BciREhtKDSogW/A=
 
-docker tag seu-registry/desafio-uds:1.0.0 seu-registry/desafio-uds:latest
+# CORS
+CORS_ALLOWED_ORIGINS=https://seu-dominio.com
 
-# push
-docker push seu-registry/desafio-uds:1.0.0
+# Profile
+SPRING_PROFILES_ACTIVE=prod
 ```
 
-No CI (GitHub Actions) configure secrets para `DOCKER_USERNAME`, `DOCKER_PASSWORD`, `REGISTRY` e `JWT_SECRET`.
+**⚠️ IMPORTANTE**: Nunca commite o `.env.prod` no Git!
+
 
 ---
 
-## 5. `docker-compose.prod.yml` (exemplo)
+## 4. Build e Deploy via Docker
 
-Salve este arquivo como `docker-compose.prod.yml` no servidor. Ajuste nomes e variáveis conforme seu ambiente.
+### 4.1. Dockerfile
+
+O projeto possui um `Dockerfile` multi-stage para build otimizado:
+
+```dockerfile
+# Build stage
+FROM maven:3.9-eclipse-temurin-17 AS builder
+WORKDIR /app
+COPY pom.xml .
+RUN mvn dependency:go-offline -q
+COPY src/ src/
+RUN mvn clean package -DskipTests -q
+
+# Runtime stage
+FROM eclipse-temurin:17-jre-alpine
+WORKDIR /app
+RUN mkdir -p uploads
+COPY --from=builder /app/target/desafio-uds-*.jar app.jar
+EXPOSE 8080
+ENTRYPOINT ["java", "-jar", "app.jar"]
+```
+
+### 4.2. Build Local
+
+```bash
+# Build da aplicação
+mvn clean package -DskipTests
+
+# Build da imagem Docker
+docker build -t desafio-uds:latest .
+
+# Tag para registry
+docker tag desafio-uds:latest seu-usuario/desafio-uds:1.0.0
+docker tag desafio-uds:latest seu-usuario/desafio-uds:latest
+
+# Push para Docker Hub
+docker login
+docker push seu-usuario/desafio-uds:1.0.0
+docker push seu-usuario/desafio-uds:latest
+```
+
+### 4.3. Docker Compose - Desenvolvimento
+
+Arquivo: `docker-compose.yml`
 
 ```yaml
-version: '3.9'
 services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: desafio-uds-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: desafio_uds
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - desafio-network
+
   backend:
-    image: seu-registry/desafio-uds:1.0.0
-    container_name: ged-backend
-    restart: unless-stopped
-    env_file: .env.prod
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: desafio-uds-backend
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/desafio_uds
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: postgres
+      SPRING_PROFILES_ACTIVE: dev
+      JWT_SECRET: MyVerySecretKeyForJWTTokenGenerationAndValidationInDevEnvironment123!@#
+      FILE_STORAGE_PATH: /app/uploads
     ports:
       - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./uploads:/app/uploads
+    networks:
+      - desafio-network
+    restart: on-failure
+
+volumes:
+  postgres_data:
+
+networks:
+  desafio-network:
+    driver: bridge
+```
+
+**Executar localmente:**
+
+```bash
+# Subir ambiente
+docker-compose up -d
+
+# Ver logs
+docker-compose logs -f backend
+
+# Parar ambiente
+docker-compose down
+
+# Limpar volumes
+docker-compose down -v
+```
+
+
+---
+
+## 5. GitHub Actions (CI/CD)
+
+### 5.1. Pipeline CI (`.github/workflows/ci.yml`)
+
+**Executa:** Build, testes unitários e análise de código
+
+**Triggers:**
+- Push em `master` e `develop`
+- Pull requests
+
+**Secrets necessários:**
+- `JWT_SECRET` - Chave JWT para testes
+
+```yaml
+name: CI Pipeline
+
+on:
+  push:
+    branches: [ master, develop ]
+  pull_request:
+    branches: [ master, develop ]
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: desafio_uds_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Build with Maven
+        run: mvn clean compile
+
+      - name: Run tests
+        run: mvn test
+        env:
+          SPRING_DATASOURCE_URL: jdbc:postgresql://localhost:5432/desafio_uds_test
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+
+      - name: Package application
+        run: mvn package -DskipTests
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: application-jar
+          path: target/*.jar
+```
+
+### 5.2. Pipeline CD (`.github/workflows/cd.yml`)
+
+**Executa:** Build, testes, Docker build/push e deploy
+
+**Triggers:**
+- Push em `develop` (staging)
+- Push em `master` (production)
+
+**Secrets necessários:**
+- `JWT_SECRET`
+- `DOCKER_USERNAME`
+- `DOCKER_PASSWORD`
+- `STAGING_HOST` (opcional)
+- `STAGING_USER` (opcional)
+- `STAGING_SSH_KEY` (opcional)
+- `PROD_HOST` (opcional)
+- `PROD_USER` (opcional)
+- `PROD_SSH_KEY` (opcional)
+
+### 5.3. Configurar Secrets no GitHub
+
+1. Acesse: `GitHub → Settings → Secrets and variables → Actions`
+2. Clique em: `New repository secret`
+3. Adicione os seguintes secrets:
+
+```bash
+# JWT Secret (gerar com PowerShell)
+$bytes = New-Object byte[] 32
+[Security.Cryptography.RNGCryptoServiceProvider]::Create().GetBytes($bytes)
+[Convert]::ToBase64String($bytes)
+# Resultado: W2wvNCz77hYzwZktjysxmypm6YL2BciREhtKDSogW/A=
+
+# Docker Hub
+Nome: DOCKER_USERNAME
+Valor: seu_username_docker_hub
+
+Nome: DOCKER_PASSWORD
+Valor: seu_token_acesso_docker_hub (gerar em hub.docker.com/settings/security)
+
+Nome: JWT_SECRET
+Valor: W2wvNCz77hYzwZktjysxmypm6YL2BciREhtKDSogW/A=
+```
+
+### 5.4. Executar Workflow Manualmente
+
+1. Acesse: `GitHub → Actions`
+2. Selecione o workflow
+3. Clique em: `Run workflow`
+4. Selecione a branch
+5. Clique em: `Run workflow`
+
+
+---
+
+## 6. Configuração de Produção
+
+### 6.1. Docker Compose Produção
+
+Crie `docker-compose.prod.yml` no servidor:
+
+```yaml
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: desafio-uds-postgres-prod
+    environment:
+      POSTGRES_USER: ${DATABASE_USER}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD}
+      POSTGRES_DB: desafio_uds_prod
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DATABASE_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - desafio-network
+    restart: unless-stopped
+
+  backend:
+    image: ${DOCKER_USERNAME}/desafio-uds:latest
+    container_name: desafio-uds-backend-prod
+    environment:
+      DATABASE_URL: jdbc:postgresql://postgres:5432/desafio_uds_prod
+      DATABASE_USER: ${DATABASE_USER}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      SPRING_PROFILES_ACTIVE: prod
+      FILE_STORAGE_PATH: /app/uploads
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
     volumes:
       - ./uploads:/app/uploads
       - ./logs:/app/logs
-    depends_on:
-      - postgres
+    networks:
+      - desafio-network
+    restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL","curl -f http://localhost:8080/api/auth/health || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/api/actuator/health || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3
 
-  postgres:
-    image: postgres:15-alpine
-    container_name: ged-postgres
-    environment:
-      POSTGRES_USER: ${SPRING_DATASOURCE_USERNAME}
-      POSTGRES_PASSWORD: ${SPRING_DATASOURCE_PASSWORD}
-      POSTGRES_DB: desafio_uds_prod
-    restart: unless-stopped
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL","pg_isready -U ${SPRING_DATASOURCE_USERNAME} -d desafio_uds_prod || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  nginx:
-    image: nginx:alpine
-    container_name: ged-nginx
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
-      - /etc/letsencrypt:/etc/letsencrypt:ro
-    depends_on:
-      - backend
-    restart: unless-stopped
-
 volumes:
-  postgres-data:
+  postgres_data:
+
+networks:
+  desafio-network:
+    driver: bridge
 ```
 
-Ajuste `seu-registry/desafio-uds:1.0.0` para o registry usado.
+### 6.2. Subir Aplicação em Produção
 
----
+```bash
+# Criar diretório no servidor
+sudo mkdir -p /opt/desafio-uds
+cd /opt/desafio-uds
 
-## 6. Nginx: reverse proxy e SSL
+# Copiar arquivos necessários
+# - docker-compose.prod.yml
+# - .env.prod
 
-Exemplo mínimo de `nginx.conf` (ajuste paths de certificados):
+# Dar pull na imagem
+docker pull seu-usuario/desafio-uds:latest
+
+# Subir aplicação
+docker-compose -f docker-compose.prod.yml up -d
+
+# Ver logs
+docker-compose -f docker-compose.prod.yml logs -f backend
+
+# Verificar status
+docker-compose -f docker-compose.prod.yml ps
+```
+
+### 6.3. Nginx (Opcional - Reverse Proxy)
+
+
+Se desejar usar Nginx como reverse proxy, crie `nginx.conf`:
 
 ```nginx
-user  nginx;
-worker_processes  auto;
-error_log  /var/log/nginx/error.log warn;
-pid        /var/run/nginx.pid;
+user nginx;
+worker_processes auto;
 
-events { worker_connections 1024; }
+events {
+    worker_connections 1024;
+}
 
 http {
-    include       /etc/nginx/mime.types;
-    default_type  application/octet-stream;
-
     upstream backend {
         server backend:8080;
     }
 
     server {
         listen 80;
-        server_name seu-dominio.com www.seu-dominio.com;
-        # redireciona para https
-        return 301 https://$host$request_uri;
-    }
-
-    server {
-        listen 443 ssl http2;
-        server_name seu-dominio.com www.seu-dominio.com;
-
-        ssl_certificate /etc/letsencrypt/live/seu-dominio.com/fullchain.pem;
-        ssl_certificate_key /etc/letsencrypt/live/seu-dominio.com/privkey.pem;
-        ssl_protocols TLSv1.2 TLSv1.3;
-        ssl_prefer_server_ciphers on;
-
-        client_max_body_size 10M; # limite de upload
+        server_name seu-dominio.com;
+        
+        client_max_body_size 10M;
 
         location / {
             proxy_pass http://backend;
@@ -235,43 +527,59 @@ http {
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $scheme;
-            proxy_http_version 1.1;
-            proxy_set_header Connection "";
         }
     }
 }
 ```
 
-Lembre-se de manter certificados atualizados e montar `/etc/letsencrypt` no container Nginx (leitura apenas).
-
----
-
-## 7. Let's Encrypt (certbot)
-
-Se o servidor tiver porta 80 aberta, você pode gerar certificados com certbot:
+Para SSL/HTTPS, adicione certificados Let's Encrypt:
 
 ```bash
+# Instalar certbot
 sudo apt install certbot
-sudo certbot certonly --standalone -d seu-dominio.com -d www.seu-dominio.com
+
+# Gerar certificado
+sudo certbot certonly --standalone -d seu-dominio.com
 
 # Os certificados ficarão em /etc/letsencrypt/live/seu-dominio.com/
 ```
 
-Automatize renovação com cron/ systemd timer (certbot já cria timer em muitos sistemas):
+Atualize o nginx.conf para usar HTTPS:
 
-```bash
-sudo systemctl enable --now certbot.timer
+```nginx
+server {
+    listen 80;
+    server_name seu-dominio.com;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name seu-dominio.com;
+
+    ssl_certificate /etc/letsencrypt/live/seu-dominio.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/seu-dominio.com/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    client_max_body_size 10M;
+
+    location / {
+        proxy_pass http://backend;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
 ```
-
-Após gerar o certificado, reinicie o Nginx para carregar os novos certificados.
 
 ---
 
-## 8. Backup / Restore
+## 7. Backup e Restore
 
-### full-backup.sh (exemplo)
+### 7.1. Script de Backup
 
-Crie `full-backup.sh` em `/opt/desafio-uds` e torne executável (chmod +x):
+Crie `full-backup.sh` em `/opt/desafio-uds`:
 
 ```bash
 #!/bin/bash
@@ -280,7 +588,9 @@ TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 mkdir -p "$BACKUP_DIR"
 
 # Dump do banco
-docker-compose -f docker-compose.prod.yml exec -T postgres pg_dump -U ${SPRING_DATASOURCE_USERNAME} desafio_uds_prod | gzip > "$BACKUP_DIR/db_$TIMESTAMP.sql.gz"
+docker-compose -f docker-compose.prod.yml exec -T postgres \
+  pg_dump -U ${DATABASE_USER} desafio_uds_prod | \
+  gzip > "$BACKUP_DIR/db_$TIMESTAMP.sql.gz"
 
 # Arquivos (uploads)
 tar -czf "$BACKUP_DIR/uploads_$TIMESTAMP.tar.gz" ./uploads
@@ -288,17 +598,35 @@ tar -czf "$BACKUP_DIR/uploads_$TIMESTAMP.tar.gz" ./uploads
 # Logs
 tar -czf "$BACKUP_DIR/logs_$TIMESTAMP.tar.gz" ./logs || true
 
-# Opcional: sync para S3
-# aws s3 cp "$BACKUP_DIR" s3://seu-bucket/backups/ --recursive
-
-echo "Backup completo criado em $BACKUP_DIR (timestamp: $TIMESTAMP)"
+echo "Backup completo: $BACKUP_DIR (timestamp: $TIMESTAMP)"
 ```
 
-### restore.sh (exemplo)
+Tornar executável:
+
+```bash
+chmod +x full-backup.sh
+```
+
+Executar manualmente:
+
+```bash
+./full-backup.sh
+```
+
+Agendar no cron (diariamente às 2h):
+
+```bash
+crontab -e
+# Adicionar linha:
+0 2 * * * cd /opt/desafio-uds && ./full-backup.sh >> /var/log/backup-desafio-uds.log 2>&1
+```
+
+### 7.2. Script de Restore
+
+Crie `restore.sh`:
 
 ```bash
 #!/bin/bash
-# uso: ./restore.sh db_20250218_120000.sql.gz uploads_20250218.tar.gz
 DB_FILE=$1
 UPLOADS_FILE=$2
 
@@ -311,7 +639,9 @@ fi
 docker-compose -f docker-compose.prod.yml down
 
 # Restaurar DB
-gunzip -c "$DB_FILE" | docker-compose -f docker-compose.prod.yml exec -T postgres psql -U ${SPRING_DATASOURCE_USERNAME} -d desafio_uds_prod
+gunzip -c "$DB_FILE" | \
+  docker-compose -f docker-compose.prod.yml exec -T postgres \
+  psql -U ${DATABASE_USER} -d desafio_uds_prod
 
 # Restaurar uploads
 tar -xzf "$UPLOADS_FILE" -C ./uploads
@@ -322,101 +652,263 @@ docker-compose -f docker-compose.prod.yml up -d
 echo "Restore completo"
 ```
 
-Teste estes scripts manualmente em um ambiente de staging antes de usar em produção.
+Tornar executável:
 
----
+```bash
+chmod +x restore.sh
+```
 
-## 9. Healthcheck e monitoramento
+Executar:
 
-- Aplicação expõe `/api/auth/health` que retorna 200 se o serviço estiver pronto.
-- Configure o `healthcheck` do `docker-compose` (exemplo no arquivo acima).
-- Para monitoramento, recomenda-se integrar Prometheus + Grafana ou usar soluções gerenciadas.
-- Centralize logs (filebeat → ELK, ou Docker logging driver).
-
-Exemplo mínimo para Prometheus: exportar métricas via actuator e apontar Prometheus.
-
----
-
-## 10. Segurança e boas práticas
-
-- Não versionar `.env.prod` ou arquivos com segredos.
-- Usar senhas fortes e rotacionar chaves regularmente.
-- Executar a imagem como usuário não-root quando possível.
-- Habilitar TLS 1.2/1.3 apenas e desabilitar ciphers antigos.
-- Use WAF e bloqueio de IP quando aplicável.
-- Habilite backups e testes periódicos de restauração.
-- Configurar limits e quotas no Nginx (rate limiting) se necessário.
-
-Exemplo de rate limiting (nginx):
-
-```nginx
-limit_req_zone $binary_remote_addr zone=api:10m rate=10r/s;
-
-server {
-  location / {
-    limit_req zone=api burst=20 nodelay;
-    proxy_pass http://backend;
-  }
-}
+```bash
+./restore.sh /backups/desafio-uds/db_20260218_020000.sql.gz \
+             /backups/desafio-uds/uploads_20260218_020000.tar.gz
 ```
 
 ---
 
-## 11. Troubleshooting rápido
+## 8. Monitoramento e Logs
 
-- Problem: `backend` não sai do estado `starting` - verifique logs do container `docker-compose -f docker-compose.prod.yml logs backend` e o `healthcheck` configurado.
-- Problem: Conexão DB falha - verifique `POSTGRES_PASSWORD` e se o volume do Postgres tem permissões corretas.
-- Problem: 502 do Nginx - verifique se o `backend` está rodando e se o upstream `backend:8080` é alcançável (use `docker-compose exec nginx ping backend`).
-- Problem: Certificados inválidos - teste `sudo certbot renew --dry-run` e reinicie o Nginx.
-
----
-
-## 12. Checklist de Deploy (resumo)
-
-- [ ] Servidor provisionado (Ubuntu 20.04+)
-- [ ] Docker instalado e funcional
-- [ ] DNS apontando para o servidor
-- [ ] `.env.prod` criado (permissões restritas)
-- [ ] Imagem Docker buildada e publicada no registry
-- [ ] `docker-compose.prod.yml` no servidor
-- [ ] `nginx.conf` configurado e montado
-- [ ] Certificado Let's Encrypt gerado
-- [ ] Backup script testado (staging)
-- [ ] Health check OK
-- [ ] Logs sendo coletados
-- [ ] Segurança configurada (firewall, TLS)
-
----
-
-## 13. Comandos Úteis
+### 8.1. Ver Logs
 
 ```bash
-# Subir em produção (modo detach)
-docker-compose -f docker-compose.prod.yml up -d
-
 # Logs do backend
 docker-compose -f docker-compose.prod.yml logs -f backend
 
-# Ver status
-docker-compose -f docker-compose.prod.yml ps
+# Logs do postgres
+docker-compose -f docker-compose.prod.yml logs -f postgres
 
-# Parar e remover containers
-docker-compose -f docker-compose.prod.yml down
+# Últimas 100 linhas
+docker-compose -f docker-compose.prod.yml logs --tail=100 backend
+```
 
-# Atualizar imagem: pull → recreate
-docker pull seu-registry/desafio-uds:1.0.0
-docker-compose -f docker-compose.prod.yml up -d --no-deps --build backend
+### 8.2. Healthcheck
+
+A aplicação expõe endpoint de health:
+
+```bash
+curl http://localhost:8080/api/actuator/health
+```
+
+Resposta esperada:
+
+```json
+{
+  "status": "UP"
+}
+```
+
+### 8.3. Monitoramento (Recomendado)
+
+Para produção, considere:
+
+- **Prometheus + Grafana**: Métricas e dashboards
+- **ELK Stack**: Centralização de logs
+- **Uptime monitoring**: UptimeRobot, Pingdom
+
+---
+
+## 9. Segurança
+
+### 9.1. Boas Práticas
+
+- ✅ **Não versionar** `.env.prod` ou arquivos com segredos
+- ✅ **Senhas fortes**: Mínimo 16 caracteres
+- ✅ **JWT Secret**: Gerar com criptografia segura (32+ bytes)
+- ✅ **HTTPS**: Obrigatório em produção
+- ✅ **Firewall**: Liberar apenas portas necessárias (80, 443, 22)
+- ✅ **Backups**: Testar restauração periodicamente
+- ✅ **Updates**: Manter imagens Docker atualizadas
+- ✅ **Rate Limiting**: Configurar no Nginx se necessário
+
+### 9.2. Firewall (UFW)
+
+```bash
+# Habilitar firewall
+sudo ufw enable
+
+# Permitir SSH
+sudo ufw allow 22/tcp
+
+# Permitir HTTP/HTTPS
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+
+# Verificar status
+sudo ufw status
+```
+
+### 9.3. Rotação de Secrets
+
+Rotacione JWT_SECRET periodicamente:
+
+```bash
+# Gerar novo secret
+$bytes = New-Object byte[] 32
+[Security.Cryptography.RNGCryptoServiceProvider]::Create().GetBytes($bytes)
+[Convert]::ToBase64String($bytes)
+
+# Atualizar .env.prod
+# Reiniciar aplicação
+docker-compose -f docker-compose.prod.yml restart backend
 ```
 
 ---
 
-## 14. Observações finais
+## 10. Troubleshooting
 
-- Teste tudo primeiro em um ambiente de staging antes de aplicar em produção.
-- Idealmente mova o storage de arquivos para S3/MinIO para resilência e escalabilidade.
-- Use um secret manager em vez de arquivos `.env.prod` em produção.
+### 10.1. Problemas Comuns
+
+**Problema: Container backend não inicia**
+
+```bash
+# Ver logs detalhados
+docker-compose -f docker-compose.prod.yml logs backend
+
+# Verificar variáveis de ambiente
+docker-compose -f docker-compose.prod.yml config
+
+# Verificar se o postgres está saudável
+docker-compose -f docker-compose.prod.yml ps
+```
+
+**Problema: Erro de conexão com banco**
+
+```bash
+# Testar conexão manual
+docker-compose -f docker-compose.prod.yml exec postgres \
+  psql -U ${DATABASE_USER} -d desafio_uds_prod -c "SELECT 1"
+
+# Verificar senha
+echo $DATABASE_PASSWORD
+```
+
+**Problema: Uploads não funcionam**
+
+```bash
+# Verificar permissões
+ls -la ./uploads
+
+# Corrigir permissões
+sudo chmod -R 755 ./uploads
+sudo chown -R 1000:1000 ./uploads
+```
+
+**Problema: 502 Bad Gateway (Nginx)**
+
+```bash
+# Verificar se backend está rodando
+curl http://localhost:8080/api/actuator/health
+
+# Verificar logs do Nginx
+docker-compose -f docker-compose.prod.yml logs nginx
+```
+
+### 10.2. Comandos Úteis
+
+```bash
+# Reiniciar aplicação
+docker-compose -f docker-compose.prod.yml restart backend
+
+# Recriar containers
+docker-compose -f docker-compose.prod.yml up -d --force-recreate
+
+# Limpar recursos não usados
+docker system prune -a
+
+# Ver uso de recursos
+docker stats
+
+# Inspecionar container
+docker inspect desafio-uds-backend-prod
+```
 
 ---
 
-Se quiser, eu crio também uma tarefa pronta do GitHub Actions para deploy automático ao dar push em `main` (com build, push e trigger remoto via SSH para `docker-compose.prod.yml`).
+## 11. Checklist de Deploy
+
+### Pré-Deploy
+
+- [ ] Servidor provisionado (Ubuntu 20.04+)
+- [ ] Docker e Docker Compose instalados
+- [ ] DNS configurado (se usar domínio)
+- [ ] Firewall configurado (UFW)
+- [ ] `.env.prod` criado com secrets fortes
+- [ ] Imagem Docker buildada e publicada
+- [ ] `docker-compose.prod.yml` criado
+
+### Deploy
+
+- [ ] Copiar arquivos para `/opt/desafio-uds`
+- [ ] Executar `docker-compose up -d`
+- [ ] Verificar logs: `docker-compose logs -f`
+- [ ] Testar health check: `curl http://localhost:8080/api/actuator/health`
+- [ ] Testar endpoints da API
+
+### Pós-Deploy
+
+- [ ] Configurar Nginx (se usado)
+- [ ] Gerar certificado SSL (Let's Encrypt)
+- [ ] Configurar backups automáticos (cron)
+- [ ] Testar restore de backup
+- [ ] Configurar monitoramento
+- [ ] Documentar credenciais (em local seguro)
+- [ ] Rotacionar secrets padrão
+
+### Manutenção
+
+- [ ] Backups diários funcionando
+- [ ] Teste mensal de restore
+- [ ] Atualizar imagens Docker (mensalmente)
+- [ ] Renovar certificados SSL (automático com certbot)
+- [ ] Revisar logs de segurança
+- [ ] Monitorar uso de disco/memória
+
+---
+
+## 12. Comandos Rápidos
+
+```bash
+# Subir aplicação
+docker-compose -f docker-compose.prod.yml up -d
+
+# Ver logs
+docker-compose -f docker-compose.prod.yml logs -f backend
+
+# Parar aplicação
+docker-compose -f docker-compose.prod.yml down
+
+# Reiniciar backend
+docker-compose -f docker-compose.prod.yml restart backend
+
+# Atualizar imagem
+docker pull seu-usuario/desafio-uds:latest
+docker-compose -f docker-compose.prod.yml up -d --no-deps --build backend
+
+# Backup
+./full-backup.sh
+
+# Restore
+./restore.sh backup.sql.gz uploads.tar.gz
+
+# Health check
+curl http://localhost:8080/api/actuator/health
+```
+
+---
+
+## 13. Suporte
+
+Para problemas ou dúvidas:
+
+1. Verificar logs: `docker-compose logs -f`
+2. Consultar documentação: `README.md`
+3. Verificar issues: GitHub Issues
+4. Contato: [seu-email@example.com]
+
+---
+
+**Status**: ✅ Documentação atualizada em 18/02/2026
+
+**Última revisão**: Deploy com Docker Compose, GitHub Actions CI/CD, e testes em português
 
