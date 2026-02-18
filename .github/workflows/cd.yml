@@ -2,9 +2,15 @@ name: CI/CD Pipeline - Build & Deploy
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ develop, master ]
   pull_request:
-    branches: [ main, develop ]
+    branches: [ develop, master ]
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+  packages: write
 
 env:
   REGISTRY: docker.io

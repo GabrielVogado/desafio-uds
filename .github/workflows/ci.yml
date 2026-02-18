@@ -2,9 +2,14 @@ name: CI Pipeline
 
 on:
   push:
-    branches: [ master, develop ]
+    branches: [ develop, master ]
   pull_request:
-    branches: [ master, develop ]
+    branches: [ develop, master ]
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
 
 jobs:
   build-and-test:
