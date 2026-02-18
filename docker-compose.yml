@@ -1,0 +1,53 @@
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: desafio-uds-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: desafio_uds
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - desafio-network
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: desafio-uds-backend
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/desafio_uds
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: postgres
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+      SPRING_MAIN_ALLOW_CIRCULAR_REFERENCES: true
+      SPRING_PROFILES_ACTIVE: dev
+      JWT_SECRET: MyVerySecretKeyForJWTTokenGenerationAndValidationInDevEnvironment123!@#
+      FILE_STORAGE_PATH: /app/uploads
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./uploads:/app/uploads
+    networks:
+      - desafio-network
+    restart: on-failure
+
+volumes:
+  postgres_data:
+
+networks:
+  desafio-network:
+    driver: bridge
+
