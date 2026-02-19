@@ -9,6 +9,9 @@ import br.com.gabrielvogado.desafiouds.model.User;
 import br.com.gabrielvogado.desafiouds.repository.DocumentRepository;
 import br.com.gabrielvogado.desafiouds.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.CachePut;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -23,6 +26,7 @@ public class DocumentService {
     @Autowired
     private UserRepository userRepository;
 
+    @CacheEvict(value = "documents", allEntries = true)
     @Transactional
     public DocumentDTO createDocument(DocumentCreateRequest request, String username) {
         User owner = userRepository.findByUsername(username)
@@ -40,6 +44,7 @@ public class DocumentService {
         return mapToDTO(savedDocument);
     }
 
+    @Cacheable(value = "documents", key = "#id")
     @Transactional(readOnly = true)
     public DocumentDTO getDocumentById(Long id, String username) {
         Document document = documentRepository.findById(id)
@@ -72,6 +77,8 @@ public class DocumentService {
         return documents.map(this::mapToDTO);
     }
 
+    @CachePut(value = "documents", key = "#id")
+    @CacheEvict(value = "documents", allEntries = true)
     @Transactional
     public DocumentDTO updateDocument(Long id, DocumentCreateRequest request, String username) {
         Document document = documentRepository.findById(id)
@@ -89,6 +96,7 @@ public class DocumentService {
         return mapToDTO(updatedDocument);
     }
 
+    @CacheEvict(value = "documents", key = "#id")
     @Transactional
     public void deleteDocument(Long id, String username) {
         Document document = documentRepository.findById(id)
